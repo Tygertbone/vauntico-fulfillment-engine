@@ -39,7 +39,7 @@ app.get('/api/status', (_req, res) => {
 });
 
 // 4) Fulfillment endpoint
-app.post('/api/fulfillment/run', async (req, res) => {
+app.post('/fulfillment/run', async (req, res) => {
   // For test run, use hard-coded recordId; in production, use req.body.recordId
   let recordId = req.body.recordId;
   const extraData = req.body.extraData;
