@@ -153,3 +153,6 @@ app.post('/api/fulfillment/run', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🟢 Server running on port ${PORT}`);
 });
+
+// For Vercel custom server compatibility
+module.exports = app;
