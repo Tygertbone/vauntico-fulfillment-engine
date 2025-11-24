@@ -1,15 +1,7 @@
-// server.js – Vauntico Fulfillment using your “Digital Products” schema
+// server.js – Vauntico Fulfillment
 
 // 1) Load .env at the very top
 require('dotenv').config({ override: true });
-
-// Validate AIRTABLE_TABLE_NAME
-if (!process.env.AIRTABLE_TABLE_NAME) {
-  throw new Error('Missing AIRTABLE_TABLE_NAME in .env');
-}
-if (process.env.AIRTABLE_TABLE_NAME !== 'Digital Products') {
-  throw new Error(`AIRTABLE_TABLE_NAME must be exactly 'Digital Products', got '${process.env.AIRTABLE_TABLE_NAME}'`);
-}
 
 console.log(
   '🔑 ENV:',
@@ -20,14 +12,12 @@ console.log(
 
 // 2) Imports & clients
 const express   = require('express');
-const Airtable  = require('airtable');
 const { Resend } = require('resend');
+const webhookValidator = require('./utils/webhookValidator');
 
 const app   = express();
 const PORT  = process.env.PORT || 5000;
 
-const base   = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY })
-                  .base(process.env.AIRTABLE_BASE_ID);
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 app.use(express.json());
@@ -40,51 +30,62 @@ app.get('/api/status', (_req, res) => {
 
 // 4) Fulfillment endpoint
 app.post('/fulfillment/run', async (req, res) => {
-  // For test run, use hard-coded recordId; in production, use req.body.recordId
-  let recordId = req.body.recordId;
-  const extraData = req.body.extraData;
-  // TEST ONLY: hard-coded recordId for dry-run
-  if (!recordId && process.env.NODE_ENV !== 'production') {
-    recordId = 'recgAH641xCwxCmlS';
-    console.log('⚠️ Using test recordId for dry-run:', recordId);
-  }
-  console.log('📥 Incoming payload:', req.body);
-
-  if (!recordId) {
-    return res.status(400).json({ error: 'recordId is required' });
-  }
-
-  // Use encodeURIComponent for table name
-  const tableName = encodeURIComponent(process.env.AIRTABLE_TABLE_NAME);
-  const baseId = process.env.AIRTABLE_BASE_ID;
-  const apiKey = process.env.AIRTABLE_API_KEY;
-  const url = `https://api.airtable.com/v0/${baseId}/${tableName}/${recordId}`;
-
-  try {
-    // Use direct fetch with PAT
-    const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-    const resp = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      console.error('Airtable fetch error:', resp.status, text);
-      return res.status(resp.status).json({
-        error: `Airtable fetch failed: ${resp.status} ${text}`,
-        stack: (new Error()).stack
-      });
+  const recordId = req.body.recordId || 'default-record-id';
+  const internalData = {
+    'default-record-id': {
+      productName: 'Sample Product',
+      productType: 'Digital',
+      priceZAR: 100,
+      productDescription: 'This is a sample product.',
+      deliveryFormat: 'Download',
+      downloadLink: 'https://example.com/download',
+      status: 'Available',
+      orderId: 'ORD12345',
+      deliveredTo: 'user@example.com',
+      grossRevenueZAR: 100,
+      isHighValue: false,
+      productSummaryAI: 'A great product.',
+      suggestedMarketingAngleAI: 'Perfect for everyone.',
+      shortDescription: 'Sample short description.'
     }
-    const data = await resp.json();
-    const fields = data.fields || {};
+  };
 
-    // Map all fields from “Digital Products”
-    const productName               = fields['Product Name'];
-    const productType               = fields['Product Type'];
-    const priceZAR                  = fields['Price (ZAR)'];
-    const productDescription        = fields['Product Description'];
+  const data = internalData[recordId];
+  if (!data) {
+    return res.status(404).json({ error: 'Record not found' });
+  }
+
+  const htmlContent = `
+    <h1>${data.productName}</h1>
+    <p><em>${data.shortDescription}</em></p>
+    <p><strong>Type:</strong> ${data.productType}</p>
+    <p><strong>Price:</strong> ZAR ${data.priceZAR}</p>
+    <p><strong>Description:</strong> ${data.productDescription}</p>
+    <p><strong>Delivery Format:</strong> ${data.deliveryFormat}</p>
+    <p><a href="${data.downloadLink}">Download your product</a></p>
+    <hr/>
+    <p><strong>Status:</strong> ${data.status}</p>
+    <p><strong>Order ID:</strong> ${data.orderId}</p>
+    <p><strong>Delivered To:</strong> ${data.deliveredTo}</p>
+    <p><strong>Gross Revenue:</strong> ZAR ${data.grossRevenueZAR}</p>
+    <p><strong>High Value Product:</strong> ${data.isHighValue}</p>
+    <h2>AI-Generated Summary</h2>
+    <p>${data.productSummaryAI}</p>
+    <h2>Suggested Marketing Angle</h2>
+    <p>${data.suggestedMarketingAngleAI}</p>
+  `;
+
+  // ✉️ Send email via Resend
+  const email = await resend.emails.send({
+    from:    process.env.SENDER_EMAIL,
+    to:      data.deliveredTo,
+    subject: `Your ${data.productName} is ready!`,
+    html:    htmlContent,
+  });
+
+  console.log('📤 Email sent with message ID:', email.id);
+  return res.json({ success: true, messageId: email.id });
+});
     const tags                      = fields['Tags'];
     const deliveryFormat            = fields['Delivery Format'];
     const downloadLink              = fields['Download Link'];
@@ -149,7 +150,13 @@ app.post('/fulfillment/run', async (req, res) => {
   }
 });
 
-// 5) Start server
+// 5) Webhook endpoint
+app.post('/webhook', webhookValidator, (req, res) => {
+  // handle validated webhook payload
+  res.status(200).send('ok');
+});
+
+// 6) Start server
 app.listen(PORT, () => {
   console.log(`🟢 Server running on port ${PORT}`);
 });
