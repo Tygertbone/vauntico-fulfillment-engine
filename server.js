@@ -1,4 +1,4 @@
-// server.js – Vauntico Fulfillment
+// server.js – Vauntico Fulfillment Engine with Claude AI Integration
 
 // 1) Load .env at the very top
 require('dotenv').config({ override: true });
@@ -7,13 +7,14 @@ console.log(
   '🔑 ENV:',
   `AIRTABLE_API_KEY=${process.env.AIRTABLE_API_KEY?.slice(0,4)}…`,
   `AIRTABLE_BASE_ID=${process.env.AIRTABLE_BASE_ID}`,
-  `AIRTABLE_TABLE_NAME=${process.env.AIRTABLE_TABLE_NAME}`
+  `AIRTABLE_TABLE_NAME=${process.env.AIRTABLE_TABLE_NAME}`,
+  `CLAUDE_API_KEY=${process.env.CLAUDE_API_KEY?.slice(0,4)}…`
 );
 
 // 2) Imports & clients
 const express   = require('express');
 const { Resend } = require('resend');
-const webhookValidator = require('./utils/webhookValidator');
+const airtableService = require('./utils/airtableService');
 
 const app   = express();
 const PORT  = process.env.PORT || 5000;
@@ -21,6 +22,12 @@ const PORT  = process.env.PORT || 5000;
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 app.use(express.json());
+
+// Claude AI Routes - NEW INTEGRATION (Protected with API key authentication)
+const claudeRoutes = require('./server/routes/claude');
+const { authenticateApiKey } = require('./middleware/auth');
+const { verifyResendWebhook } = require('./middleware/webhookAuth');
+app.use('/api/claude', authenticateApiKey, claudeRoutes);
 
 // 3) Health check
 app.get('/api/status', (_req, res) => {
@@ -30,29 +37,22 @@ app.get('/api/status', (_req, res) => {
 
 // 4) Fulfillment endpoint
 app.post('/fulfillment/run', async (req, res) => {
-  const recordId = req.body.recordId || 'default-record-id';
-  const internalData = {
-    'default-record-id': {
-      productName: 'Sample Product',
-      productType: 'Digital',
-      priceZAR: 100,
-      productDescription: 'This is a sample product.',
-      deliveryFormat: 'Download',
-      downloadLink: 'https://example.com/download',
-      status: 'Available',
-      orderId: 'ORD12345',
-      deliveredTo: 'user@example.com',
-      grossRevenueZAR: 100,
-      isHighValue: false,
-      productSummaryAI: 'A great product.',
-      suggestedMarketingAngleAI: 'Perfect for everyone.',
-      shortDescription: 'Sample short description.'
-    }
-  };
+  try {
+  const recordId = req.body.recordId;
 
-  const data = internalData[recordId];
+  if (!recordId) {
+    return res.status(400).json({ error: 'Record ID is required' });
+  }
+
+  // Fetch product data from Airtable
+  const data = await airtableService.getProductByRecordId(recordId);
   if (!data) {
-    return res.status(404).json({ error: 'Record not found' });
+    return res.status(404).json({ error: 'Product record not found in database' });
+  }
+
+  // Ensure required fields exist
+  if (!data.deliveredTo || !data.productName) {
+    return res.status(400).json({ error: 'Missing required product data: deliveredTo or productName' });
   }
 
   const htmlContent = `
@@ -85,62 +85,6 @@ app.post('/fulfillment/run', async (req, res) => {
 
   console.log('📤 Email sent with message ID:', email.id);
   return res.json({ success: true, messageId: email.id });
-});
-    const tags                      = fields['Tags'];
-    const deliveryFormat            = fields['Delivery Format'];
-    const downloadLink              = fields['Download Link'];
-    const downloadFile              = fields['Download File'];
-    const status                    = fields['Status'];
-    const orderId                   = fields['Order ID'];
-    const deliveredTo               = fields['Delivered To'];
-    const grossRevenueZAR           = fields['Gross Revenue (ZAR)'];
-    const isHighValue               = fields['Is High Value Product?'];
-    const productSummaryAI          = fields['Product Summary (AI)'];
-    const suggestedMarketingAngleAI = fields['Suggested Marketing Angle (AI)'];
-    const shortDescription          = fields['Short Description'];
-
-    console.log(`🎯 Fetched ${recordId}:`, {
-      productName, productType, priceZAR, deliveryFormat, downloadLink, status, orderId
-    });
-
-    // Build email HTML
-    const htmlContent = `
-      <h1>${productName}</h1>
-      <p><em>${shortDescription}</em></p>
-      <p><strong>Type:</strong> ${productType}</p>
-      <p><strong>Price:</strong> ZAR ${priceZAR}</p>
-      <p><strong>Description:</strong> ${productDescription}</p>
-      <p><strong>Tags:</strong> ${Array.isArray(tags) ? tags.join(', ') : tags}</p>
-      <p><strong>Delivery Format:</strong> ${deliveryFormat}</p>
-      <p><a href="${downloadLink}">Download your product</a></p>
-      ${
-        Array.isArray(downloadFile) && downloadFile.length
-          ? `<p>Attachment: <a href="${downloadFile[0].url}">${downloadFile[0].filename}</a></p>`
-          : ''
-      }
-      <hr/>
-      <p><strong>Status:</strong> ${status}</p>
-      <p><strong>Order ID:</strong> ${orderId}</p>
-      <p><strong>Delivered To:</strong> ${deliveredTo}</p>
-      <p><strong>Gross Revenue:</strong> ZAR ${grossRevenueZAR}</p>
-      <p><strong>High Value Product:</strong> ${isHighValue}</p>
-      <h2>AI-Generated Summary</h2>
-      <p>${productSummaryAI}</p>
-      <h2>Suggested Marketing Angle</h2>
-      <p>${suggestedMarketingAngleAI}</p>
-      ${extraData ? `<hr/><p>${extraData}</p>` : ''}
-    `;
-
-    // ✉️ Send email via Resend
-    const email = await resend.emails.send({
-      from:    process.env.SENDER_EMAIL,
-      to:      deliveredTo,
-      subject: `Your ${productName} is ready!`,
-      html:    htmlContent,
-    });
-
-    console.log('📤 Email sent with message ID:', email.id);
-    return res.json({ success: true, messageId: email.id });
   } catch (err) {
     console.error('⚠️ Fulfillment error:', err.stack || err);
     return res.status(500).json({
@@ -150,10 +94,42 @@ app.post('/fulfillment/run', async (req, res) => {
   }
 });
 
-// 5) Webhook endpoint
-app.post('/webhook', webhookValidator, (req, res) => {
-  // handle validated webhook payload
-  res.status(200).send('ok');
+// 5) Webhook endpoint for Resend email events (Protected with signature verification)
+app.post('/webhook', verifyResendWebhook, (req, res) => {
+  try {
+    console.log('📧 Webhook received:', JSON.stringify(req.body, null, 2));
+
+    // TODO: Add Resend webhook signature validation
+    // For now, log the payload and acknowledge receipt
+    const eventType = req.body?.type || 'unknown';
+    console.log(`📧 Processing webhook event: ${eventType}`);
+
+    // Handle different webhook events (email delivered, opened, clicked, etc.)
+    switch (eventType) {
+      case 'email.delivered':
+        console.log('✅ Email delivered successfully');
+        break;
+      case 'email.opened':
+        console.log('👁️ Email opened by recipient');
+        break;
+      case 'email.clicked':
+        console.log('👆 Email link clicked');
+        break;
+      case 'email.bounced':
+        console.log('⚠️ Email bounced');
+        break;
+      case 'email.complained':
+        console.log('⚠️ Email complaint received');
+        break;
+      default:
+        console.log(`📧 Unhandled event type: ${eventType}`);
+    }
+
+    res.status(200).send('ok');
+  } catch (error) {
+    console.error('❌ Webhook error:', error);
+    res.status(500).send('error');
+  }
 });
 
 // 6) Start server
