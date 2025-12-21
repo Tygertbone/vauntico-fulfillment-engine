@@ -1,11 +1,15 @@
 {
   "name": "vauntico-fulfillment-engine",
   "version": "1.0.0",
+  "packageManager": "npm@10.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "nodemon server.js",
     "start": "node server.js",
-    "test": "jest"
+    "build": "echo 'No build step required for Node.js server'",
+    "test": "jest",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
   },
   "keywords": [],
   "author": "",
