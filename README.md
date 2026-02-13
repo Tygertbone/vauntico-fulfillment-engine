@@ -31,3 +31,41 @@ This infrastructure is managed by a headless, autonomous cloud agent designed fo
    ```bash
    git clone [https://github.com/Tygertbone/vauntico-fulfillment-engine.git](https://github.com/Tygertbone/vauntico-fulfillment-engine.git)
    npm install
+
+2.​Environment Configuration:
+Create a .env file (this is excluded from version control):
+
+        # API Keys
+        AIRTABLE_API_KEY=your_airtable_pat
+        AIRTABLE_BASE_ID=appBhHL11mxVND348
+        AIRTABLE_TABLE_NAME=Digital Products
+        RESEND_API_KEY=your_resend_key
+
+        # Server Settings
+        SENDER_EMAIL=your@email.com
+        PORT=5000
+
+
+3. Run:
+    
+       bash
+       npm start
+
+
+​📡 API Reference
+​Trigger Fulfillment
+​POST /api/fulfillment/run
+​Body: { "recordId": "recXXXXXXXXXXXX" }
+​Action: Triggers the fulfillment logic and customer notification.
+​System Health
+​GET /api/status
+​Returns: { status: 'ok', self_healing: 'active' }
+​📈 Roadmap to $1B
+​[x] Core Fulfillment Logic (75% Complete)
+​[x] Phantom Maintainer "Heartbeat" & "Intent" Integration
+​[ ] Global Financial TrustScore Framework (40% Complete)
+​[ ] Creator Command Center & Analytics Dashboard
+​🤝 Join the Mission
+​We are Open Source because trust requires transparency. Whether you are a creator, a developer, or an investor, you are welcome to contribute to the future of the global creator economy.
+
+​CEO & Founder: Tygertbone
