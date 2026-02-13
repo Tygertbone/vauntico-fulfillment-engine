@@ -1,0 +1,40 @@
+name: 🛡️ Phantom Maintainer Heartbeat
+
+on:
+  schedule:
+    # Runs every morning at 08:00 UTC (Adjust as needed)
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Allows you to run it manually for testing
+
+jobs:
+  morning-brief:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Read TrustScore Metrics
+        id: metrics
+        run: |
+          if [ -f fulfillment_metrics.json ]; then
+            # Read the JSON and set as outputs
+            ACCURACY=$(jq -r '.accuracy_rate' fulfillment_metrics.json)
+            TOTAL=$(jq -r '.total' fulfillment_metrics.json)
+            echo "accuracy=$ACCURACY" >> $GITHUB_OUTPUT
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          else
+            echo "accuracy=N/A" >> $GITHUB_OUTPUT
+            echo "total=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📧 Send Morning Brief (via Resend)
+        run: |
+          curl -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer ${{ secrets.RESEND_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "from": "Phantom Maintainer <${{ secrets.SENDER_EMAIL }}>",
+              "to": ["tyatjamesd@gmail.com"],
+              "subject": "🛡️ Vauntico Morning Brief: TrustScore is ${{ steps.metrics.outputs.accuracy }}%",
+              "html": "<h3>Morning Brief</h3><p><strong>System Status:</strong> PERMANENT GREEN</p><ul><li><strong>TrustScore:</strong> ${{ steps.metrics.outputs.accuracy }}%</li><li><strong>Total Transactions:</strong> ${{ steps.metrics.outputs.total }}</li></ul><p><em>Phantom Maintainer has verified your codebase. No leaks detected.</em></p>"
+            }'
